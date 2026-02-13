@@ -17,7 +17,7 @@
     
     <div id="overlay" style="display:none;">
         <h1 style="color:#00ff00; margin:0;">STREET RIDER</h1>
-        <p style="margin:10px;">ANDROID AUDIO FIX ENABLED</p>
+        <p style="margin:10px;">AUDIO VOLUMES BALANCED</p>
         <button class="start-btn" id="goButton">START GAME</button>
     </div>
 
@@ -37,27 +37,44 @@ canvas.height = window.innerHeight;
 
 const repoBase = "https://raw.githubusercontent.com/iordanist-design/my-bike-game/main/";
 
-// --- THE ANDROID AUDIO UNLOCKER ---
+// --- UPDATED AUDIO VOLUMES ---
 const music = new Audio();
 music.crossOrigin = "anonymous";
 music.src = `${repoBase}BeepBox-Song.mp3`;
 music.loop = true;
-music.volume = 0.5;
+music.volume = 0.6; // Increased from 0.4 to 0.6
 
+let audioCtx;
 let audioStarted = false;
 let gameStarted = false;
 
-// This function "primes" the audio on mobile
 function unlockAudio() {
     if (audioStarted) return;
-    
-    // Play and immediately pause to "unlock" the audio channel
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
     music.play().then(() => {
-        console.log("Audio Unlocked!");
         audioStarted = true;
-    }).catch(err => {
-        console.log("Waiting for user gesture...");
-    });
+    }).catch(err => console.log("Waiting for gesture..."));
+}
+
+function playFunnyCrash() {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 1.2);
+    
+    // REDUCED CRASH VOLUME
+    gain.gain.setValueAtTime(0.1, audioCtx.currentTime); // Subtle 10% volume
+    gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.2);
+    
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + 1.2);
 }
 
 // --- IMAGES ---
@@ -89,7 +106,7 @@ const player = {
 const obstacles = [], dogs = [];
 
 function startTheGame() {
-    unlockAudio(); // Final attempt to play
+    unlockAudio();
     overlayEl.style.display = 'none';
     canvas.style.display = 'block';
     document.getElementById('ui').style.display = 'block';
@@ -106,13 +123,11 @@ const updateInput = (e) => {
     player.targetY = clientY - rect.top;
 };
 
-// Listeners optimized for Android gesture detection
 window.addEventListener('mousemove', updateInput);
 window.addEventListener('touchmove', (e) => { e.preventDefault(); updateInput(e); }, { passive: false });
 
-// This "touchstart" on the GO button is the key to Android audio
 overlayEl.addEventListener('touchstart', (e) => {
-    unlockAudio(); // Trigger audio on the very first touch
+    unlockAudio();
 }, { passive: true });
 
 window.addEventListener('mousedown', () => { 
@@ -121,13 +136,8 @@ window.addEventListener('mousedown', () => {
 });
 
 window.addEventListener('touchstart', (e) => { 
-    if (!gameStarted) { 
-        e.preventDefault(); 
-        startTheGame(); 
-    } else if (!gameActive) { 
-        e.preventDefault(); 
-        location.reload(); 
-    }
+    if (!gameStarted) { e.preventDefault(); startTheGame(); }
+    else if (!gameActive) { e.preventDefault(); location.reload(); }
 }, { passive: false });
 
 function checkCollision(p, o, pad) {
@@ -160,13 +170,21 @@ function update() {
     obstacles.forEach((o, i) => {
         o.y += (8 * gameSpeed);
         if (o.y > canvas.height) obstacles.splice(i, 1);
-        if (checkCollision(player, o, 15)) { gameActive = false; music.pause(); }
+        if (checkCollision(player, o, 15)) { 
+            gameActive = false; 
+            music.pause(); 
+            playFunnyCrash(); 
+        }
     });
 
     dogs.forEach((d, i) => {
         d.x += d.speedX;
         if (Math.abs(d.x - canvas.width/2) > 1000) dogs.splice(i, 1);
-        if (checkCollision(player, d, 20)) { gameActive = false; music.pause(); }
+        if (checkCollision(player, d, 20)) { 
+            gameActive = false; 
+            music.pause(); 
+            playFunnyCrash(); 
+        }
     });
 }
 
@@ -192,7 +210,6 @@ function draw() {
         ctx.restore();
     });
     
-    // Bike Design
     ctx.save();
     ctx.translate(player.x, player.y);
     ctx.rotate(player.tilt);
