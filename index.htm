@@ -7,18 +7,18 @@
         body { margin: 0; background: #111; overflow: hidden; font-family: 'Arial Black', sans-serif; touch-action: none; }
         canvas { display: block; background: #555; margin: 0 auto; cursor: pointer; }
         #ui { position: absolute; top: 20px; width: 100%; text-align: center; color: #00ff00; font-size: 24px; pointer-events: none; text-shadow: 2px 2px #000; z-index: 10; }
-        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; z-index: 30; cursor: pointer; text-align: center; padding: 20px; }
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; z-index: 30; cursor: pointer; text-align: center; }
         #loading { position: absolute; top: 50%; width: 100%; text-align: center; color: white; transform: translateY(-50%); z-index: 20; }
-        .btn { background: #00ff00; color: black; padding: 15px 30px; border-radius: 50px; font-size: 20px; margin-top: 20px; }
+        .start-btn { background: #00ff00; color: black; padding: 15px 30px; border-radius: 50px; font-size: 20px; margin-top: 20px; border: none; font-family: 'Arial Black'; }
     </style>
 </head>
 <body>
     <div id="loading">PREPARING THE ROAD...<br><span id="loadProgress">0%</span></div>
     
     <div id="overlay" style="display:none;">
-        <h1 style="color:#00ff00; margin:0;">STREET RIDER</h1>
-        <p>DODGE THE DOGS & POTHOLES</p>
-        <div class="btn">START GAME</div>
+        <h1 style="color:#00ff00; margin-bottom:10px;">STREET RIDER</h1>
+        <p>TAP TO START & PLAY MUSIC</p>
+        <button class="start-btn">GO!</button>
     </div>
 
     <div id="ui" style="display:none;">DIST: <span id="score">0</span>m</div>
@@ -37,7 +37,7 @@ canvas.height = window.innerHeight;
 
 const repoBase = "https://raw.githubusercontent.com/iordanist-design/my-bike-game/main/";
 
-// --- AUDIO ---
+// --- AUDIO CONFIG ---
 const music = new Audio();
 music.src = `${repoBase}BeepBox-Song.mp3`;
 music.loop = true;
@@ -45,11 +45,25 @@ music.volume = 0.4;
 let audioStarted = false;
 let gameStarted = false;
 
-// --- SETTINGS ---
+// Tuning
 const gridW = 65; 
 const offX = 1;
 
-// --- IMAGES ---
+// Procedural Crash Sound
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playFunnyCrash() {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 1.2);
+    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.2);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + 1.2);
+}
+
+// Load Images
 const dogSheets = [];
 let loadedCount = 0;
 const totalSheets = 10;
@@ -68,7 +82,6 @@ for (let i = 0; i < totalSheets; i++) {
     dogSheets.push(img);
 }
 
-// --- GAME LOGIC ---
 let score = 0, gameActive = true, isPaused = false, frame = 0, roadY = 0, gameSpeed = 1.0;
 const player = { x: canvas.width / 2, y: canvas.height - 150, targetX: canvas.width / 2, w: 30, h: 60, tilt: 0 };
 const obstacles = [], dogs = [];
@@ -84,97 +97,142 @@ function startTheGame() {
 }
 
 function handleInteraction() { 
-    if (!gameStarted) startTheGame();
-    else if (!gameActive) location.reload(); 
-    else {
+    if (!gameStarted) {
+        startTheGame();
+    } else if (!gameActive) {
+        location.reload(); 
+    } else {
         isPaused = !isPaused;
         if (isPaused) music.pause(); else music.play();
     }
 }
 
+// --- IMPROVED TOUCH CONTROLS ---
 const updateInput = (e) => {
     if (isPaused || !gameActive || !gameStarted) return;
     const rect = canvas.getBoundingClientRect();
+    // Use first touch or mouse click
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     player.targetX = clientX - rect.left;
 };
 
 window.addEventListener('mousemove', updateInput);
-window.addEventListener('touchmove', (e) => { e.preventDefault(); updateInput(e); }, { passive: false });
+window.addEventListener('touchmove', (e) => {
+    e.preventDefault(); // Prevents Android from scrolling the page
+    updateInput(e);
+}, { passive: false });
+
 window.addEventListener('mousedown', handleInteraction);
-window.addEventListener('touchstart', (e) => { e.preventDefault(); handleInteraction(); }, { passive: false });
+window.addEventListener('touchstart', (e) => {
+    // Only handleInteraction if it's not a movement touch
+    if (!gameStarted || !gameActive) {
+        e.preventDefault();
+        handleInteraction();
+    }
+}, { passive: false });
+
+function spawn() {
+    if (frame % Math.max(40, Math.floor(80 / gameSpeed)) === 0) {
+        let size = 0.7 + Math.random() * 0.5;
+        obstacles.push({ x: Math.random() * (canvas.width - 100) + 20, y: -120, w: 70 * size, h: 40 * size });
+    }
+    if (frame % Math.max(50, Math.floor(100 / gameSpeed)) === 0) {
+        const side = Math.random() < 0.5 ? -150 : canvas.width + 150;
+        dogs.push({
+            x: side, y: Math.random() * (canvas.height * 0.7) + 50,
+            speedX: (side < 0 ? 3.5 : -3.5) * gameSpeed,
+            sheet: dogSheets[Math.floor(Math.random() * totalSheets)],
+            animFrame: 7, animTimer: 0, w: 100, h: 75
+        });
+    }
+}
+
+function update() {
+    if (!gameActive || isPaused || !gameStarted) return;
+
+    frame++;
+    gameSpeed += 0.00001; 
+    score += gameSpeed;
+    scoreEl.innerText = Math.floor(score/10);
+
+    let prevX = player.x;
+    player.x += (player.targetX - player.x) * 0.15;
+    player.tilt = (player.x - prevX) * 0.07;
+    
+    roadY = (roadY + (8 * gameSpeed)) % 100;
+
+    obstacles.forEach((o, i) => {
+        o.y += (8 * gameSpeed);
+        if (o.y > canvas.height) obstacles.splice(i, 1);
+        if (checkCollision(player, o, 15)) { gameActive = false; music.pause(); playFunnyCrash(); }
+    });
+
+    dogs.forEach((d, i) => {
+        d.x += d.speedX;
+        if (Math.abs(d.x - canvas.width/2) > 1000) dogs.splice(i, 1);
+        if (checkCollision(player, d, 20)) { gameActive = false; music.pause(); playFunnyCrash(); }
+    });
+    spawn();
+}
 
 function checkCollision(p, o, pad) {
     return p.x < o.x + o.w - pad && p.x + p.w > o.x + pad &&
            p.y < o.y + o.h - pad && p.y + p.h > o.y + pad;
 }
 
-function update() {
-    if (!gameActive || isPaused || !gameStarted) return;
-    frame++;
-    gameSpeed += 0.00001; 
-    score += gameSpeed;
-    scoreEl.innerText = Math.floor(score/10);
-
-    player.x += (player.targetX - player.x) * 0.15;
-    player.tilt = (player.x - (player.x - (player.targetX - player.x) * 0.15)) * 0.07;
-    roadY = (roadY + (8 * gameSpeed)) % 100;
-
-    if (frame % 80 === 0) {
-        obstacles.push({ x: Math.random() * (canvas.width - 70), y: -100, w: 70, h: 40 });
+function drawDog(d) {
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    if (d.speedX > 0) ctx.scale(-1, 1); 
+    if (!isPaused) {
+        d.animTimer += gameSpeed;
+        if (d.animTimer > 4) { d.animFrame--; if (d.animFrame < 0) d.animFrame = 7; d.animTimer = 0; }
     }
-    if (frame % 100 === 0) {
-        const side = Math.random() < 0.5 ? -150 : canvas.width + 150;
-        dogs.push({ x: side, y: Math.random() * (canvas.height * 0.6) + 50, speedX: (side < 0 ? 3.5 : -3.5) * gameSpeed, sheet: dogSheets[Math.floor(Math.random() * totalSheets)], animFrame: 7, animTimer: 0, w: 100, h: 75 });
-    }
-
-    obstacles.forEach((o, i) => {
-        o.y += (8 * gameSpeed);
-        if (o.y > canvas.height) obstacles.splice(i, 1);
-        if (checkCollision(player, o, 15)) { gameActive = false; music.pause(); }
-    });
-
-    dogs.forEach((d, i) => {
-        d.x += d.speedX;
-        if (Math.abs(d.x - canvas.width/2) > 1000) dogs.splice(i, 1);
-        if (checkCollision(player, d, 20)) { gameActive = false; music.pause(); }
-    });
+    const sx = (d.animFrame * gridW) + offX;
+    if (d.sheet.complete) ctx.drawImage(d.sheet, sx, 3*48, gridW, 48, -d.w/2, -d.h/2, d.w, d.h);
+    ctx.restore();
 }
 
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = "#555"; ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    ctx.strokeStyle = "rgba(255,255,255,0.4)"; ctx.setLineDash([40, 60]); ctx.lineWidth = 6;
+    // Road Marks
+    ctx.strokeStyle = "rgba(255,255,255,0.4)";
+    ctx.setLineDash([40, 60]); ctx.lineWidth = 6;
     ctx.beginPath(); ctx.moveTo(canvas.width/2, roadY - 100); ctx.lineTo(canvas.width/2, canvas.height + roadY); ctx.stroke();
 
+    // Potholes
     obstacles.forEach(o => {
         const grad = ctx.createRadialGradient(o.x + o.w/2, o.y + o.h/2, o.w/10, o.x + o.w/2, o.y + o.h/2, o.w/2);
         grad.addColorStop(0, "rgba(20, 20, 20, 1)"); grad.addColorStop(1, "rgba(85, 85, 85, 0)");
         ctx.fillStyle = grad; ctx.beginPath(); ctx.ellipse(o.x+o.w/2, o.y+o.h/2, o.w/2, o.h/2, 0, 0, Math.PI*2); ctx.fill();
     });
     
-    dogs.forEach(d => {
-        ctx.save(); ctx.translate(d.x, d.y);
-        if (d.speedX > 0) ctx.scale(-1, 1); 
-        if (!isPaused) {
-            d.animTimer += gameSpeed;
-            if (d.animTimer > 4) { d.animFrame--; if (d.animFrame < 0) d.animFrame = 7; d.animTimer = 0; }
-        }
-        ctx.drawImage(d.sheet, d.animFrame * gridW + offX, 3*48, gridW, 48, -d.w/2, -d.h/2, d.w, d.h);
-        ctx.restore();
-    });
+    dogs.forEach(drawDog);
     
-    ctx.save(); ctx.translate(player.x, player.y);
-    ctx.fillStyle = "#ff3333"; ctx.fillRect(-15, -25, 30, 50);
-    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, -12, 8, 0, Math.PI*2); ctx.fill();
+    // Player
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.rotate(player.tilt);
+    ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.beginPath(); ctx.ellipse(0, 15, 12, 35, 0, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = "#ff3333"; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(0, -25); ctx.lineTo(0, 25); ctx.stroke();
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(0, 5, 10, 15, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#000"; ctx.beginPath(); ctx.arc(0, -12, 8, 0, Math.PI*2); ctx.fill();
     ctx.restore();
 
-    if (isPaused) { ctx.fillStyle="rgba(0,0,0,0.5)"; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.fillStyle="white"; ctx.textAlign="center"; ctx.font="30px Arial"; ctx.fillText("PAUSED", canvas.width/2, canvas.height/2); }
-    if (!gameActive) { ctx.fillStyle="rgba(0,0,0,0.8)"; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#00ff00"; ctx.textAlign="center"; ctx.font="40px Arial"; ctx.fillText("CRASHED!", canvas.width/2, canvas.height/2); }
-
-    update();
-    requestAnimationFrame(draw);
+    if (isPaused && gameActive) {
+        ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle="white"; ctx.textAlign="center"; ctx.font="bold 30px Arial";
+        ctx.fillText("PAUSED", canvas.width/2, canvas.height/2);
+    }
+    if (!gameActive) {
+        ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle = "#00ff00"; ctx.textAlign = "center"; ctx.font = "bold 40px Arial";
+        ctx.fillText("CRASHED!", canvas.width/2, canvas.height/2);
+    }
+    requestAnimationFrame(() => { update(); draw(); });
 }
 </script>
 </body>
+</html>
