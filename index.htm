@@ -70,7 +70,7 @@ function playFunnyCrash() {
     osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 1.2);
     
     // REDUCED CRASH VOLUME
-    gain.gain.setValueAtTime(0.1, audioCtx.currentTime); // Subtle 10% volume
+    gain.gain.setValueAtTime(0.6, audioCtx.currentTime); // Subtle 10% volume
     gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.2);
     
     osc.connect(gain); gain.connect(audioCtx.destination);
