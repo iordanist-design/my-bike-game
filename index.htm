@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Street Rider: BeepBox Loop</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        body { margin: 0; background: #111; overflow: hidden; font-family: 'Arial Black', sans-serif; }
+        canvas { display: block; background: #444; margin: 0 auto; }
+        #ui { position: absolute; top: 20px; width: 100%; text-align: center; color: #00ff00; font-size: 24px; pointer-events: none; text-shadow: 2px 2px #000; z-index: 10; }
+        #loading { position: absolute; top: 50%; width: 100%; text-align: center; color: white; transform: translateY(-50%); z-index: 20; }
+    </style>
+</head>
+<body>
+    <div id="loading">SYNCING BEEPBOX AUDIO...<br><span id="loadProgress">0%</span></div>
+    <div id="ui" style="display:none;">DIST: <span id="score">0</span>m</div>
+    <canvas id="gameCanvas" style="display:none;"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const loadingEl = document.getElementById('loading');
+const progressEl = document.getElementById('loadProgress');
+
+canvas.width = window.innerWidth > 500 ? 450 : window.innerWidth;
+canvas.height = window.innerHeight;
+
+// --- GITHUB ASSET CONFIG ---
+const repoBase = "https://raw.githubusercontent.com/iordanist-design/my-bike-game/main/";
+
+// --- AUDIO CONFIG ---
+const music = new Audio();
+music.src = `${repoBase}BeepBox-Song.mp3`; // UPDATED TO MP3
+music.volume = 0.4;
+let audioStarted = false;
+
+// --- FUNNY GAME OVER SOUND (PROCEDURAL) ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playFunnyCrash() {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    
+    osc.type = 'sawtooth'; // Retro crunchy sound
+    osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 1.2); // Pitch slide down
+    
+    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.2);
+    
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    
+    osc.start();
+    osc.stop(audioCtx.currentTime + 1.2);
+}
+
+function handleAudioLoop() {
+    if (music.currentTime >= 12) {
+        music.currentTime = 0;
+        music.play();
+    }
+}
+
+// --- TUNED DOG SETTINGS ---
+const gridW = 65; 
+const offX = 1;
+
+const dogSheets = [];
+let loadedCount = 0;
+const totalSheets = 10;
+
+for (let i = 0; i < totalSheets; i++) {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+        loadedCount++;
+        progressEl.innerText = Math.floor((loadedCount / totalSheets) * 100) + "%";
+        if (loadedCount === totalSheets) startGame();
+    };
+    img.src = `${repoBase}Dogs-Remastered-0${i}.png`;
+    dogSheets.push(img);
+}
+
+let score = 0, gameActive = true, isPaused = false, frame = 0, roadY = 0, gameSpeed = 1.0;
+const player = { x: canvas.width / 2, y: canvas.height - 150, targetX: canvas.width / 2, w: 30, h: 60 };
+const obstacles = [], dogs = [];
+
+const handleInteraction = () => { 
+    if (!gameActive) {
+        location.reload(); 
+    } else {
+        isPaused = !isPaused;
+        if (!audioStarted) {
+            music.play().catch(e => console.log("Audio interaction required"));
+            audioStarted = true;
+        }
+        if (isPaused) music.pause();
+        else music.play();
+    }
+};
+
+window.addEventListener('mousemove', (e) => {
+    if (isPaused || !gameActive) return;
+    const rect = canvas.getBoundingClientRect();
+    player.targetX = (e.clientX || (e.touches && e.touches[0].clientX)) - rect.left;
+});
+
+window.addEventListener('mousedown', handleInteraction);
+window.addEventListener('touchstart', (e) => { e.preventDefault(); handleInteraction(); }, {passive: false});
+
+function spawn() {
+    if (frame % Math.max(40, Math.floor(80 / gameSpeed)) === 0) {
+        let size = 0.7 + Math.random() * 0.5;
+        obstacles.push({ x: Math.random() * (canvas.width - 100) + 20, y: -120, w: 70 * size, h: 40 * size });
+    }
+    if (frame % Math.max(50, Math.floor(100 / gameSpeed)) === 0) {
+        const side = Math.random() < 0.5 ? -150 : canvas.width + 150;
+        dogs.push({
+            x: side, y: Math.random() * (canvas.height * 0.7) + 50,
+            speedX: (side < 0 ? 3.5 : -3.5) * gameSpeed,
+            sheet: dogSheets[Math.floor(Math.random() * totalSheets)],
+            animFrame: 7, animTimer: 0, w: 100, h: 75
+        });
+    }
+}
+
+function update() {
+    if (!gameActive || isPaused) return;
+    handleAudioLoop();
+    frame++;
+    gameSpeed += 0.00001; 
+    score += gameSpeed;
+    scoreEl.innerText = Math.floor(score/10);
+    player.x += (player.targetX - player.x) * 0.15;
+    roadY = (roadY + (8 * gameSpeed)) % 100;
+
+    obstacles.forEach((o, i) => {
+        o.y += (8 * gameSpeed);
+        if (o.y > canvas.height) obstacles.splice(i, 1);
+        if (checkCollision(player, o, 15)) { 
+            gameActive = false; 
+            music.pause();
+            playFunnyCrash(); // Trigger the funny sound
+        }
+    });
+
+    dogs.forEach((d, i) => {
+        d.x += d.speedX;
+        if (Math.abs(d.x - canvas.width/2) > 1000) dogs.splice(i, 1);
+        if (checkCollision(player, d, 20)) { 
+            gameActive = false; 
+            music.pause();
+            playFunnyCrash(); // Trigger the funny sound
+        }
+    });
+    spawn();
+}
+
+function checkCollision(p, o, pad) {
+    return p.x < o.x + o.w - pad && p.x + p.w > o.x + pad &&
+           p.y < o.y + o.h - pad && p.y + p.h > o.y + pad;
+}
+
+function drawDog(d) {
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    if (d.speedX > 0) ctx.scale(-1, 1); 
+    if (!isPaused) {
+        d.animTimer += gameSpeed;
+        if (d.animTimer > 4) { d.animFrame--; if (d.animFrame < 0) d.animFrame = 7; d.animTimer = 0; }
+    }
+    const sx = (d.animFrame * gridW) + offX;
+    if (d.sheet.complete) ctx.drawImage(d.sheet, sx, 3*48, gridW, 48, -d.w/2, -d.h/2, d.w, d.h);
+    ctx.restore();
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#555"; 
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Road Marks
+    ctx.strokeStyle = "rgba(255,255,255,0.4)";
+    ctx.setLineDash([40, 60]);
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width/2, roadY - 100);
+    ctx.lineTo(canvas.width/2, canvas.height + roadY);
+    ctx.stroke();
+
+    // Gradient Potholes
+    obstacles.forEach(o => {
+        const grad = ctx.createRadialGradient(o.x + o.w/2, o.y + o.h/2, o.w/10, o.x + o.w/2, o.y + o.h/2, o.w/2);
+        grad.addColorStop(0, "rgba(20, 20, 20, 1)");
+        grad.addColorStop(1, "rgba(85, 85, 85, 0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.ellipse(o.x + o.w/2, o.y + o.h/2, o.w/2, o.h/2, 0, 0, Math.PI*2);
+        ctx.fill();
+    });
+    
+    dogs.forEach(drawDog);
+    
+    // Player
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    ctx.beginPath(); ctx.ellipse(0, 15, 12, 35, 0, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = "#ff3333"; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(0, -25); ctx.lineTo(0, 25); ctx.stroke();
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(0, 5, 10, 15, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#000"; ctx.beginPath(); ctx.arc(0, -12, 8, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+
+    if (isPaused && gameActive) {
+        ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle="white"; ctx.textAlign="center"; ctx.font="bold 30px Arial";
+        ctx.fillText("PAUSED", canvas.width/2, canvas.height/2);
+    }
+    if (!gameActive) {
+        ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle = "#00ff00"; ctx.textAlign = "center"; ctx.font = "bold 40px Arial";
+        ctx.fillText("CRASHED!", canvas.width/2, canvas.height/2);
+    }
+    requestAnimationFrame(() => { update(); draw(); });
+}
+
+function startGame() {
+    loadingEl.style.display = 'none';
+    canvas.style.display = 'block';
+    document.getElementById('ui').style.display = 'block';
+    draw();
+}
+</script>
+</body>
+</html>
