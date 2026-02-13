@@ -7,18 +7,18 @@
         body { margin: 0; background: #111; overflow: hidden; font-family: 'Arial Black', sans-serif; touch-action: none; }
         canvas { display: block; background: #555; margin: 0 auto; cursor: pointer; }
         #ui { position: absolute; top: 20px; width: 100%; text-align: center; color: #00ff00; font-size: 24px; pointer-events: none; text-shadow: 2px 2px #000; z-index: 10; }
-        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; z-index: 30; cursor: pointer; text-align: center; }
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; z-index: 30; cursor: pointer; text-align: center; }
         #loading { position: absolute; top: 50%; width: 100%; text-align: center; color: white; transform: translateY(-50%); z-index: 20; }
-        .start-btn { background: #00ff00; color: black; padding: 15px 40px; border-radius: 50px; font-size: 24px; margin-top: 20px; border: none; font-family: 'Arial Black'; box-shadow: 0 5px #008800; }
+        .start-btn { background: #00ff00; color: black; padding: 20px 50px; border-radius: 50px; font-size: 28px; margin-top: 20px; border: none; font-family: 'Arial Black'; box-shadow: 0 8px #008800; }
     </style>
 </head>
 <body>
     <div id="loading">LOADING ASSETS...<br><span id="loadProgress">0%</span></div>
     
     <div id="overlay" style="display:none;">
-        <h1 style="color:#00ff00; margin-bottom:10px;">STREET RIDER</h1>
-        <p>TAP THE BUTTON TO START</p>
-        <button class="start-btn" id="goButton">GO!</button>
+        <h1 style="color:#00ff00; margin:0;">STREET RIDER</h1>
+        <p style="margin:10px;">ANDROID AUDIO FIX ENABLED</p>
+        <button class="start-btn" id="goButton">START GAME</button>
     </div>
 
     <div id="ui" style="display:none;">DIST: <span id="score">0</span>m</div>
@@ -37,50 +37,27 @@ canvas.height = window.innerHeight;
 
 const repoBase = "https://raw.githubusercontent.com/iordanist-design/my-bike-game/main/";
 
-// --- THE ULTIMATE AUDIO FIX ---
+// --- THE ANDROID AUDIO UNLOCKER ---
 const music = new Audio();
-music.crossOrigin = "anonymous"; // Fixes GitHub CORS issues
+music.crossOrigin = "anonymous";
 music.src = `${repoBase}BeepBox-Song.mp3`;
 music.loop = true;
 music.volume = 0.5;
-music.preload = 'auto';
 
-let audioCtx;
 let audioStarted = false;
 let gameStarted = false;
 
-function initAudio() {
+// This function "primes" the audio on mobile
+function unlockAudio() {
     if (audioStarted) return;
     
-    // Create or Resume Audio Context
-    if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-
-    // Attempt to play the music
-    const playPromise = music.play();
-    if (playPromise !== undefined) {
-        playPromise.then(() => {
-            audioStarted = true;
-            console.log("Music Playing!");
-        }).catch(error => {
-            console.log("Autoplay prevented. Retrying on next touch.");
-        });
-    }
-}
-
-function playFunnyCrash() {
-    if (!audioCtx) return;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(300, audioCtx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 1.2);
-    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-    gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.2);
-    osc.connect(gain); gain.connect(audioCtx.destination);
-    osc.start(); osc.stop(audioCtx.currentTime + 1.2);
+    // Play and immediately pause to "unlock" the audio channel
+    music.play().then(() => {
+        console.log("Audio Unlocked!");
+        audioStarted = true;
+    }).catch(err => {
+        console.log("Waiting for user gesture...");
+    });
 }
 
 // --- IMAGES ---
@@ -112,7 +89,7 @@ const player = {
 const obstacles = [], dogs = [];
 
 function startTheGame() {
-    initAudio(); // Force audio on start
+    unlockAudio(); // Final attempt to play
     overlayEl.style.display = 'none';
     canvas.style.display = 'block';
     document.getElementById('ui').style.display = 'block';
@@ -122,24 +99,35 @@ function startTheGame() {
 
 const updateInput = (e) => {
     if (!gameActive || !gameStarted) return;
-    // Keep trying to play music if it hasn't started yet
-    if (!audioStarted) initAudio();
-
     const rect = canvas.getBoundingClientRect();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    
     player.targetX = clientX - rect.left;
     player.targetY = clientY - rect.top;
 };
 
-// Listeners
+// Listeners optimized for Android gesture detection
 window.addEventListener('mousemove', updateInput);
 window.addEventListener('touchmove', (e) => { e.preventDefault(); updateInput(e); }, { passive: false });
-window.addEventListener('mousedown', () => { if (!gameStarted) startTheGame(); else if (!gameActive) location.reload(); });
+
+// This "touchstart" on the GO button is the key to Android audio
+overlayEl.addEventListener('touchstart', (e) => {
+    unlockAudio(); // Trigger audio on the very first touch
+}, { passive: true });
+
+window.addEventListener('mousedown', () => { 
+    if (!gameStarted) startTheGame(); 
+    else if (!gameActive) location.reload(); 
+});
+
 window.addEventListener('touchstart', (e) => { 
-    if (!gameStarted) { e.preventDefault(); startTheGame(); }
-    else if (!gameActive) { e.preventDefault(); location.reload(); }
+    if (!gameStarted) { 
+        e.preventDefault(); 
+        startTheGame(); 
+    } else if (!gameActive) { 
+        e.preventDefault(); 
+        location.reload(); 
+    }
 }, { passive: false });
 
 function checkCollision(p, o, pad) {
@@ -172,13 +160,13 @@ function update() {
     obstacles.forEach((o, i) => {
         o.y += (8 * gameSpeed);
         if (o.y > canvas.height) obstacles.splice(i, 1);
-        if (checkCollision(player, o, 15)) { gameActive = false; music.pause(); playFunnyCrash(); }
+        if (checkCollision(player, o, 15)) { gameActive = false; music.pause(); }
     });
 
     dogs.forEach((d, i) => {
         d.x += d.speedX;
         if (Math.abs(d.x - canvas.width/2) > 1000) dogs.splice(i, 1);
-        if (checkCollision(player, d, 20)) { gameActive = false; music.pause(); playFunnyCrash(); }
+        if (checkCollision(player, d, 20)) { gameActive = false; music.pause(); }
     });
 }
 
@@ -204,7 +192,7 @@ function draw() {
         ctx.restore();
     });
     
-    // Detailed Bike
+    // Bike Design
     ctx.save();
     ctx.translate(player.x, player.y);
     ctx.rotate(player.tilt);
