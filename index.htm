@@ -1,17 +1,24 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Street Rider: BeepBox Loop</title>
+    <title>Street Rider</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; background: #111; overflow: hidden; font-family: 'Arial Black', sans-serif; }
-        canvas { display: block; background: #444; margin: 0 auto; }
+        body { margin: 0; background: #111; overflow: hidden; font-family: 'Arial Black', sans-serif; touch-action: none; }
+        canvas { display: block; background: #555; margin: 0 auto; cursor: pointer; }
         #ui { position: absolute; top: 20px; width: 100%; text-align: center; color: #00ff00; font-size: 24px; pointer-events: none; text-shadow: 2px 2px #000; z-index: 10; }
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; z-index: 30; cursor: pointer; }
         #loading { position: absolute; top: 50%; width: 100%; text-align: center; color: white; transform: translateY(-50%); z-index: 20; }
     </style>
 </head>
 <body>
-    <div id="loading">SYNCING BEEPBOX AUDIO...<br><span id="loadProgress">0%</span></div>
+    <div id="loading">PREPARING THE ROAD...<br><span id="loadProgress">0%</span></div>
+    
+    <div id="overlay" style="display:none;">
+        <h1 style="color:#00ff00; margin-bottom:10px;">STREET RIDER</h1>
+        <p>TAP TO START & PLAY MUSIC</p>
+    </div>
+
     <div id="ui" style="display:none;">DIST: <span id="score">0</span>m</div>
     <canvas id="gameCanvas" style="display:none;"></canvas>
 
@@ -21,92 +28,99 @@ const ctx = canvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const loadingEl = document.getElementById('loading');
 const progressEl = document.getElementById('loadProgress');
+const overlayEl = document.getElementById('overlay');
 
 canvas.width = window.innerWidth > 500 ? 450 : window.innerWidth;
 canvas.height = window.innerHeight;
 
-// --- GITHUB ASSET CONFIG ---
 const repoBase = "https://raw.githubusercontent.com/iordanist-design/my-bike-game/main/";
 
 // --- AUDIO CONFIG ---
 const music = new Audio();
-music.src = `${repoBase}BeepBox-Song.mp3`; // UPDATED TO MP3
+music.src = `${repoBase}BeepBox-Song.mp3`;
+music.loop = true; // Loops the whole song now
 music.volume = 0.4;
 let audioStarted = false;
+let gameStarted = false; // New state to prevent movement before start
 
-// --- FUNNY GAME OVER SOUND (PROCEDURAL) ---
+// Tuning
+const gridW = 65; 
+const offX = 1;
+
+// Procedural Crash Sound
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 function playFunnyCrash() {
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-    
-    osc.type = 'sawtooth'; // Retro crunchy sound
+    osc.type = 'sawtooth';
     osc.frequency.setValueAtTime(300, audioCtx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 1.2); // Pitch slide down
-    
+    osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 1.2);
     gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
     gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.2);
-    
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    
-    osc.start();
-    osc.stop(audioCtx.currentTime + 1.2);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + 1.2);
 }
 
-function handleAudioLoop() {
-    if (music.currentTime >= 12) {
-        music.currentTime = 0;
-        music.play();
-    }
-}
-
-// --- TUNED DOG SETTINGS ---
-const gridW = 65; 
-const offX = 1;
-
+// Load Images
 const dogSheets = [];
 let loadedCount = 0;
 const totalSheets = 10;
-
 for (let i = 0; i < totalSheets; i++) {
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
         loadedCount++;
         progressEl.innerText = Math.floor((loadedCount / totalSheets) * 100) + "%";
-        if (loadedCount === totalSheets) startGame();
+        if (loadedCount === totalSheets) showStartScreen();
     };
     img.src = `${repoBase}Dogs-Remastered-0${i}.png`;
     dogSheets.push(img);
 }
 
 let score = 0, gameActive = true, isPaused = false, frame = 0, roadY = 0, gameSpeed = 1.0;
-const player = { x: canvas.width / 2, y: canvas.height - 150, targetX: canvas.width / 2, w: 30, h: 60 };
+const player = { x: canvas.width / 2, y: canvas.height - 150, targetX: canvas.width / 2, w: 30, h: 60, tilt: 0 };
 const obstacles = [], dogs = [];
 
-const handleInteraction = () => { 
-    if (!gameActive) {
+function showStartScreen() {
+    loadingEl.style.display = 'none';
+    overlayEl.style.display = 'flex';
+}
+
+function startTheGame() {
+    overlayEl.style.display = 'none';
+    canvas.style.display = 'block';
+    document.getElementById('ui').style.display = 'block';
+    
+    // Start music immediately on this click
+    music.play().catch(e => console.log("Audio Error"));
+    audioStarted = true;
+    gameStarted = true;
+    
+    draw();
+}
+
+function handleInteraction() { 
+    if (!gameStarted) {
+        startTheGame();
+    } else if (!gameActive) {
         location.reload(); 
     } else {
         isPaused = !isPaused;
-        if (!audioStarted) {
-            music.play().catch(e => console.log("Audio interaction required"));
-            audioStarted = true;
-        }
-        if (isPaused) music.pause();
-        else music.play();
+        if (isPaused) music.pause(); else music.play();
     }
+}
+
+const updateInput = (e) => {
+    if (isPaused || !gameActive || !gameStarted) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    player.targetX = clientX - rect.left;
 };
 
-window.addEventListener('mousemove', (e) => {
-    if (isPaused || !gameActive) return;
-    const rect = canvas.getBoundingClientRect();
-    player.targetX = (e.clientX || (e.touches && e.touches[0].clientX)) - rect.left;
-});
-
+window.addEventListener('mousemove', updateInput);
+window.addEventListener('touchmove', (e) => { e.preventDefault(); updateInput(e); }, { passive: false });
 window.addEventListener('mousedown', handleInteraction);
-window.addEventListener('touchstart', (e) => { e.preventDefault(); handleInteraction(); }, {passive: false});
+window.addEventListener('touchstart', (e) => { e.preventDefault(); handleInteraction(); }, { passive: false });
 
 function spawn() {
     if (frame % Math.max(40, Math.floor(80 / gameSpeed)) === 0) {
@@ -125,33 +139,29 @@ function spawn() {
 }
 
 function update() {
-    if (!gameActive || isPaused) return;
-    handleAudioLoop();
+    if (!gameActive || isPaused || !gameStarted) return;
+
     frame++;
     gameSpeed += 0.00001; 
     score += gameSpeed;
     scoreEl.innerText = Math.floor(score/10);
+
+    let prevX = player.x;
     player.x += (player.targetX - player.x) * 0.15;
+    player.tilt = (player.x - prevX) * 0.07;
+    
     roadY = (roadY + (8 * gameSpeed)) % 100;
 
     obstacles.forEach((o, i) => {
         o.y += (8 * gameSpeed);
         if (o.y > canvas.height) obstacles.splice(i, 1);
-        if (checkCollision(player, o, 15)) { 
-            gameActive = false; 
-            music.pause();
-            playFunnyCrash(); // Trigger the funny sound
-        }
+        if (checkCollision(player, o, 15)) { gameActive = false; music.pause(); playFunnyCrash(); }
     });
 
     dogs.forEach((d, i) => {
         d.x += d.speedX;
         if (Math.abs(d.x - canvas.width/2) > 1000) dogs.splice(i, 1);
-        if (checkCollision(player, d, 20)) { 
-            gameActive = false; 
-            music.pause();
-            playFunnyCrash(); // Trigger the funny sound
-        }
+        if (checkCollision(player, d, 20)) { gameActive = false; music.pause(); playFunnyCrash(); }
     });
     spawn();
 }
@@ -176,27 +186,18 @@ function drawDog(d) {
 
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "#555"; 
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#555"; ctx.fillRect(0, 0, canvas.width, canvas.height);
     
     // Road Marks
     ctx.strokeStyle = "rgba(255,255,255,0.4)";
-    ctx.setLineDash([40, 60]);
-    ctx.lineWidth = 6;
-    ctx.beginPath();
-    ctx.moveTo(canvas.width/2, roadY - 100);
-    ctx.lineTo(canvas.width/2, canvas.height + roadY);
-    ctx.stroke();
+    ctx.setLineDash([40, 60]); ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(canvas.width/2, roadY - 100); ctx.lineTo(canvas.width/2, canvas.height + roadY); ctx.stroke();
 
-    // Gradient Potholes
+    // Potholes
     obstacles.forEach(o => {
         const grad = ctx.createRadialGradient(o.x + o.w/2, o.y + o.h/2, o.w/10, o.x + o.w/2, o.y + o.h/2, o.w/2);
-        grad.addColorStop(0, "rgba(20, 20, 20, 1)");
-        grad.addColorStop(1, "rgba(85, 85, 85, 0)");
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.ellipse(o.x + o.w/2, o.y + o.h/2, o.w/2, o.h/2, 0, 0, Math.PI*2);
-        ctx.fill();
+        grad.addColorStop(0, "rgba(20, 20, 20, 1)"); grad.addColorStop(1, "rgba(85, 85, 85, 0)");
+        ctx.fillStyle = grad; ctx.beginPath(); ctx.ellipse(o.x+o.w/2, o.y+o.h/2, o.w/2, o.h/2, 0, 0, Math.PI*2); ctx.fill();
     });
     
     dogs.forEach(drawDog);
@@ -204,10 +205,9 @@ function draw() {
     // Player
     ctx.save();
     ctx.translate(player.x, player.y);
-    ctx.fillStyle = "rgba(0,0,0,0.3)";
-    ctx.beginPath(); ctx.ellipse(0, 15, 12, 35, 0, 0, Math.PI*2); ctx.fill();
-    ctx.strokeStyle = "#ff3333"; ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.moveTo(0, -25); ctx.lineTo(0, 25); ctx.stroke();
+    ctx.rotate(player.tilt);
+    ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.beginPath(); ctx.ellipse(0, 15, 12, 35, 0, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = "#ff3333"; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(0, -25); ctx.lineTo(0, 25); ctx.stroke();
     ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(0, 5, 10, 15, 0, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = "#000"; ctx.beginPath(); ctx.arc(0, -12, 8, 0, Math.PI*2); ctx.fill();
     ctx.restore();
@@ -223,13 +223,6 @@ function draw() {
         ctx.fillText("CRASHED!", canvas.width/2, canvas.height/2);
     }
     requestAnimationFrame(() => { update(); draw(); });
-}
-
-function startGame() {
-    loadingEl.style.display = 'none';
-    canvas.style.display = 'block';
-    document.getElementById('ui').style.display = 'block';
-    draw();
 }
 </script>
 </body>
